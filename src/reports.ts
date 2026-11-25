@@ -41,7 +41,7 @@ export function subscribeReports(role: 'admin' | 'belediye', district: string, r
     } catch (error) { fail(error) }
   }, fail)
 }
-export async function saveReport(id: string, data: Partial<Pick<Report, 'status' | 'priority' | 'solutionPhoto'>>) {
+export async function saveReport(id: string, data: Partial<Pick<Report, 'status' | 'priority'>> & { solutionPhoto?: string | null }) {
   const changes: DocumentData = { updatedAt: serverTimestamp() }
   if (data.status) {
     changes[reportSchema.fields.status] = reportSchema.statuses[data.status]
@@ -54,7 +54,7 @@ export async function saveReport(id: string, data: Partial<Pick<Report, 'status'
     if (data.status !== 'resolved') changes.resolvedAt = deleteField()
   }
   if (data.priority) changes[reportSchema.fields.priority] = data.priority
-  if (data.solutionPhoto) changes[reportSchema.fields.solutionPhoto] = data.solutionPhoto
+  if (data.solutionPhoto !== undefined) changes[reportSchema.fields.solutionPhoto] = data.solutionPhoto === null ? deleteField() : data.solutionPhoto
   await updateDoc(doc(db, reportSchema.collection, id), changes)
 }
 export async function uploadSolution(file: File): Promise<string> {
