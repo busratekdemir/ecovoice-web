@@ -121,7 +121,7 @@ export default function App(){
     await patch(r.id,{status})
   }
   async function attach(r:Report,files:File[]){
-    if(!files.length || busy || reportsLoading || reportsError)return
+    if(panel!=='municipality' || !session || !user || !files.length || busy || reportsLoading || reportsError)return
     if(files.length!==1){setNotice('En fazla bir çözüm fotoğrafı seçebilirsiniz.');return}
     const file=files[0]
     if(!['image/png','image/jpeg','image/webp'].includes(file.type)||file.size>1024*1024){setNotice('1 MB altında JPG, PNG veya WebP dosyası seç.');return}
@@ -134,7 +134,7 @@ export default function App(){
     finally{setBusy(false)}
   }
   async function removeSolution(r:Report){
-    if(busy || reportsLoading || reportsError)return
+    if(panel!=='municipality' || !session || !user || busy || reportsLoading || reportsError)return
     setBusy(true);setNotice('')
     try{
       await saveReport(r.id,{solutionPhoto:null,...(r.status==='resolved'?{status:'in_progress' as const}:{})})
@@ -190,7 +190,7 @@ export default function App(){
         <h3>{r.title}</h3><p>{r.description}</p><p className="muted">{r.district}{r.lat!==undefined && r.lng!==undefined ? ` · ${r.lat.toFixed(3)}, ${r.lng.toFixed(3)}` : ' · Konum yok'}</p>
         {r.photo&&<img src={r.photo} alt="Bildirilen çevre sorunu"/>}
         <div className="actions">{admin?<>{r.status==='pending' && <><button className="primary" disabled={busy || !!reportsError} onClick={()=>transition(r,'new')}>Onayla</button><button className="outline" disabled={busy || !!reportsError} onClick={()=>transition(r,'rejected')}>Reddet</button></>}<ReportEditor key={`${r.id}-${r.status}-${r.priority}`} report={r} disabled={busy || !!reportsError} save={patch} /></>:<><span>Öncelik · {r.priority}</span>{r.status==='new'&&<button className="primary" disabled={busy || !!reportsError} onClick={()=>transition(r,'in_progress')}>Müdahaleye başla</button>}{r.status==='in_progress'&&<><button className="primary" disabled={!r.solutionPhoto||busy||!!reportsError} onClick={()=>transition(r,'resolved')}>Çözüldü olarak işaretle</button></>}</>}</div>
-        <SolutionPhoto report={r} editable={r.status==='in_progress' || r.status==='resolved' || !!r.solutionPhoto} disabled={busy || reportsLoading || !!reportsError} attach={files=>attach(r,files)} remove={()=>removeSolution(r)} />
+        <SolutionPhoto report={r} editable={!admin && (r.status==='in_progress' || r.status==='resolved' || !!r.solutionPhoto)} disabled={busy || reportsLoading || !!reportsError} attach={files=>attach(r,files)} remove={()=>removeSolution(r)} />
       </article>)}
     </main>}
   </div>
