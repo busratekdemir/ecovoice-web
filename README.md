@@ -35,3 +35,11 @@ Admin tüm koleksiyonu, belediye kendi ilçesini `onSnapshot` ile dinler. İlk s
 Firestore kuralları bu depoda bulunmuyor ve değiştirilmedi. Mevcut kurallar admin okuma/güncellemelerine, belediyenin kendi ilçesine ait sorgu ve izin verilen güncellemelerine izin vermeli; kullanıcıların kendi rollerini değiştirmesini engellemelidir. Arayüzdeki rol kontrolü veritabanı yetkilendirmesinin yerini tutmaz.
 
 Gerçek hesaplarla kontrol: Android'den bekleyen bildirim gönderin → admin ekranında ve yeni bildirim uyarısında görünmesini doğrulayın → onaylayın → ilgili ilçe belediyesinde görünmesini doğrulayın → müdahale, ImgBB fotoğraf ve çözüm adımlarını uygulayın → telefonda aynı belgenin güncellendiğini doğrulayın. Başka ilçe hesabının belgeye erişemediğini de kontrol edin.
+
+## Harita ve admin durum düzeltmeleri
+
+Admin ve belediye panellerinde onaylanan bildirimler haritada görünür: kırmızı `new` (çözülmemiş), sarı `in_progress`, yeşil `resolved`. Bekleyen/reddedilen kayıtlar haritada gösterilmez. Liste filtreleri haritadaki genel durum görünümünü değiştirmez; harita tüm onaylanan kayıtları gösterir. Konumsuz kayıtlar listelenir ve haritanın altında sayıları belirtilir.
+
+Harita İzmir–Manisa merkezli açılır. “İzmir–Manisa’ya dön” bölge görünümünü, “Tüm noktaları göster” konumu bulunan tüm onaylı bildirimleri kadraja alır. Canlı veriler güncellendiğinde kullanıcının yakınlaştırması ve harita konumu korunur. İl sınırları geoBoundaries/OpenStreetMap kaynaklıdır; veri sürümü ve lisans `src/data/BOUNDARIES.md` dosyasındadır.
+
+Durum kartları ve liste filtresi aynı seçimi kullanır. “Onaylanan” yeni, müdahalede ve çözülmüş kayıtları kapsar. Admin, her kayıtta “Durumu / önceliği düzenle” bölümünden durumu tekrar incelemeye alabilir, reddedebilir veya düzeltebilir. Kaydet düğmesi Firestore'a yazar; eski aşamalara dönüşte geçersiz kalan aşama tarihleri silinir. Özgün oluşturulma tarihi ve çözüm fotoğrafı korunur. Çözüldü durumuna geçiş için çözüm fotoğrafı gerekir. Bu güncellemelerin mevcut Firestore kurallarınca da izinli olması gerekir.

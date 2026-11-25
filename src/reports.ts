@@ -1,11 +1,11 @@
-import { collection, doc, onSnapshot, query, serverTimestamp, updateDoc, where } from 'firebase/firestore'
+import { collection, deleteField, doc, onSnapshot, query, serverTimestamp, updateDoc, where } from 'firebase/firestore'
 import type { DocumentData } from 'firebase/firestore'
 import { db } from './firebase'
 
 export type Status = 'pending' | 'rejected' | 'new' | 'in_progress' | 'resolved'
 export type Priority = 'Düşük' | 'Orta' | 'Yüksek'
 export type Report = { id: string; title: string; description: string; district: string; category: string; priority: Priority; status: Status; lat?: number; lng?: number; photo?: string; solutionPhoto?: string }
-export const labels: Record<Status, string> = { pending: 'İnceleme bekliyor', rejected: 'Reddedildi', new: 'Yeni', in_progress: 'Müdahalede', resolved: 'Çözüldü' }
+export const labels: Record<Status, string> = { pending: 'İnceleme bekliyor', rejected: 'Reddedildi', new: 'Onaylandı · Çözülmemiş', in_progress: 'Çözülmekte', resolved: 'Çözüldü' }
 // Android şeması farklıysa yalnızca bu eşlemeleri değiştirin.
 export const reportSchema = {
   collection: import.meta.env.VITE_REPORTS_COLLECTION || 'reports',
@@ -36,7 +36,7 @@ export function subscribeReports(role: 'admin' | 'belediye', district: string, r
       const reports = snapshot.docs.map(item => decodeReport(item.id, item.data()))
       const pending = new Set(reports.filter(item => item.status === 'pending').map(item => item.id))
       const newCount = initialized ? [...pending].filter(id => !previous.has(id)).length : 0
-      previous = pending; initialized = true
+      previous = new Set(reports.map(item => item.id)); initialized = true
       receive(reports, newCount)
     } catch (error) { fail(error) }
   }, fail)
@@ -45,8 +45,13 @@ export async function saveReport(id: string, data: Partial<Pick<Report, 'status'
   const changes: DocumentData = { updatedAt: serverTimestamp() }
   if (data.status) {
     changes[reportSchema.fields.status] = reportSchema.statuses[data.status]
-    const field = { new: 'approvedAt', rejected: 'rejectedAt', in_progress: 'startedAt', resolved: 'resolvedAt', pending: 'submittedAt' }[data.status]
+    const field = { new: 'approvedAt', rejected: 'rejectedAt', in_progress: 'startedAt', resolved: 'resolvedAt', pending: 'reviewRequestedAt' }[data.status]
     changes[field] = serverTimestamp()
+    // Geri alınan durumlardaki eski aşama tarihleri güncel durumu yanıltmasın.
+    if (['pending', 'rejected'].includes(data.status)) changes.approvedAt = deleteField()
+    if (data.status !== 'rejected') changes.rejectedAt = deleteField()
+    if (['pending', 'rejected', 'new'].includes(data.status)) changes.startedAt = deleteField()
+    if (data.status !== 'resolved') changes.resolvedAt = deleteField()
   }
   if (data.priority) changes[reportSchema.fields.priority] = data.priority
   if (data.solutionPhoto) changes[reportSchema.fields.solutionPhoto] = data.solutionPhoto
