@@ -1,12 +1,15 @@
 import { useEffect, useState } from 'react'
 import type { FormEvent } from 'react'
+import { FirebaseError } from 'firebase/app'
+import { createUserWithEmailAndPassword, onAuthStateChanged, signInWithEmailAndPassword, signOut } from 'firebase/auth'
+import type { User } from 'firebase/auth'
+import { doc, getDocFromServer } from 'firebase/firestore'
+import { auth, db } from './firebase'
 
 type Status = 'pending' | 'rejected' | 'new' | 'in_progress' | 'resolved'
 type Priority = 'Düşük' | 'Orta' | 'Yüksek'
 type Report = { id:string; title:string; description:string; district:string; category:string; priority:Priority; status:Status; lat:number; lng:number; photo?:string; solutionPhoto?:string; approvedAt?:string; startedAt?:string; resolvedAt?:string }
-type Account = {email:string; salt:string; digest:string}
 const reportsKey = 'ecovoice-web-demo-v1'
-const accountsKey = 'ecovoice-local-accounts-v1'
 const labels:Record<Status,string> = {pending:'İnceleme bekliyor', rejected:'Reddedildi', new:'Yeni', in_progress:'Müdahalede', resolved:'Çözüldü'}
 const initial:Report[] = [
   {id:'EV-001',title:'Dere kenarında atık birikmiş',description:'Dere kenarında plastik şişeler ve çöp poşetleri var.',district:'Bornova',category:'Atık',priority:'Orta',status:'pending',lat:38.462,lng:27.219},
@@ -20,10 +23,19 @@ function loadReports(){
   try {const list=stored(reportsKey,initial); return Array.isArray(list)?list:initial}
   catch{return initial}
 }
-async function passwordDigest(password:string,salt:string){
-  const key=await crypto.subtle.importKey('raw',new TextEncoder().encode(password),'PBKDF2',false,['deriveBits'])
-  const bits=await crypto.subtle.deriveBits({name:'PBKDF2',salt:new TextEncoder().encode(salt),iterations:160000,hash:'SHA-256'},key,256)
-  return Array.from(new Uint8Array(bits),n=>n.toString(16).padStart(2,'0')).join('')
+function authMessage(error:unknown){
+  const code=error instanceof FirebaseError ? error.code : ''
+  switch(code){
+    case 'auth/invalid-credential': case 'auth/user-not-found': case 'auth/wrong-password': return 'E-posta veya parola hatalı.'
+    case 'auth/email-already-in-use': return 'Bu e-posta adresi zaten kayıtlı.'
+    case 'auth/invalid-email': return 'Geçerli bir e-posta adresi girin.'
+    case 'auth/weak-password': case 'auth/password-does-not-meet-requirements': return 'Parola güvenlik koşullarını karşılamıyor. Daha güçlü bir parola seçin.'
+    case 'auth/too-many-requests': return 'Çok fazla deneme yapıldı. Lütfen daha sonra tekrar deneyin.'
+    case 'auth/network-request-failed': return 'Sunucuya bağlanılamadı. İnternet bağlantınızı kontrol edin.'
+    case 'auth/user-disabled': return 'Bu hesap devre dışı bırakılmış. Yöneticiyle iletişime geçin.'
+    case 'auth/operation-not-allowed': return 'E-posta ve parola ile giriş Firebase projesinde etkin değil.'
+    default: return 'Hesap işlemi tamamlanamadı. Lütfen tekrar deneyin.'
+  }
 }
 function Forest(){
   return <div className="forest" aria-hidden="true">
@@ -48,7 +60,9 @@ function MunicipalityMapArea() {
 function Brand(){return <div className="brand"><span className="mark" aria-hidden="true">▲</span>EcoVoice</div>}
 
 export default function App(){
-  const [session,setSession]=useState<'demo'|'local'|null>(null)
+  const [session,setSession]=useState<'demo'|'firebase'|null>(null)
+  const [user,setUser]=useState<User|null>(null)
+  const [authLoading,setAuthLoading]=useState(true)
   const [register,setRegister]=useState(false)
   const [panel,setPanel]=useState<'admin'|'municipality'>('admin')
   const [reports,setReports]=useState(loadReports)
@@ -60,30 +74,60 @@ export default function App(){
     try{localStorage.setItem(reportsKey,JSON.stringify(reports));setStorageError('')}
     catch{setStorageError('Bu tarayıcı değişiklikleri saklayamadı. Daha küçük bir fotoğraf deneyin.')}
   },[reports])
+  useEffect(()=>{
+    let active=true
+    let revision=0
+    const unsubscribe=onAuthStateChanged(auth,async currentUser=>{
+      const request=++revision
+      setUser(currentUser);setSession(null)
+      if(!currentUser){setAuthLoading(false);return}
+      setAuthLoading(true);setRegister(false);setNotice('')
+      try{
+        const profile=await getDocFromServer(doc(db,'users',currentUser.uid))
+        if(!active || request!==revision)return
+        const role=profile.data()?.role
+        if(role==='admin' || role==='belediye'){
+          setPanel(role==='admin'?'admin':'municipality');setFilter('all');setSession('firebase')
+        }else{
+          setNotice('Hesabınızda panel yetkisi bulunmuyor. Bir yöneticinin users/'+currentUser.uid+' belgesine admin veya belediye rolünü atamasını bekleyin.')
+        }
+      }catch{
+        if(active && request===revision)setNotice('Hesabınıza giriş yapıldı ancak panel rolünüz Firestore üzerinden okunamadı. Bağlantınızı ve erişim izinlerini kontrol edip sayfayı yenileyin.')
+      }finally{
+        if(active && request===revision)setAuthLoading(false)
+      }
+    },()=>{
+      if(active){setAuthLoading(false);setNotice('Oturum kontrol edilemedi. Sayfayı yenileyip tekrar deneyin.')}
+    })
+    return ()=>{active=false;revision++;unsubscribe()}
+  },[])
+  async function logout(){
+    setBusy(true)
+    try{await signOut(auth);setUser(null);setSession(null);setRegister(false);setNotice('')}
+    catch(error){setNotice(authMessage(error))}
+    finally{setBusy(false)}
+  }
   function openPanel(next:typeof panel){setPanel(next);setFilter('all');setNotice('')}
   async function submit(event:FormEvent<HTMLFormElement>){
     event.preventDefault()
     const form=new FormData(event.currentTarget)
     const email=String(form.get('email')).trim().toLowerCase()
     const password=String(form.get('password'))
+    if(busy || authLoading)return
+    if(register && password!==form.get('again')){setNotice('Parolalar eşleşmiyor.');return}
     setBusy(true);setNotice('')
     try{
-      const users=stored<Account[]>(accountsKey,[])
-      const account=users.find(u=>u.email===email)
       if(register){
-        if(password!==form.get('again')){setNotice('Parolalar eşleşmiyor.');return}
-        if(account){setNotice('Bu e-posta bu tarayıcıda zaten kayıtlı.');return}
-        const salt=crypto.randomUUID()
-        const digest=await passwordDigest(password,salt)
-        localStorage.setItem(accountsKey,JSON.stringify([...users,{email,salt,digest}]))
-        setRegister(false);setNotice('Demo hesabın oluşturuldu. E-posta ve parolanla giriş yapabilirsin.')
+        await createUserWithEmailAndPassword(auth,email,password)
+        // Kayıt panel rolü oluşturmaz; yetki yalnızca yönetici tarafından atanır.
+        setRegister(false)
       }else{
-        if(!account || account.digest!==await passwordDigest(password,account.salt)){setNotice('E-posta veya parola hatalı.');return}
-        openPanel('municipality');setSession('local')
+        await signInWithEmailAndPassword(auth,email,password)
       }
-    }catch{setNotice('Yerel hesap işlemi tamamlanamadı. Demo ile giriş yapabilirsin.')}
+    }catch(error){setNotice(authMessage(error))}
     finally{setBusy(false)}
   }
+
   function patch(id:string,data:Partial<Report>){setReports(old=>old.map(r=>r.id===id?{...r,...data}:r))}
   function transition(r:Report,status:Status){
     const now=new Date().toISOString()
@@ -106,24 +150,24 @@ export default function App(){
   const municipal=reports.filter(r=>r.district==='Bornova'&&['new','in_progress','resolved'].includes(r.status))
   const list=(admin?pending:municipal).filter(r=>filter==='all'||r.status===filter)
   return <div className="ev"><style>{styles}</style>
-    <header className="top"><Brand/><span className="wordmark">ÇEVRE BİLDİRİM SİSTEMİ</span>{session&&<button className="textBtn" onClick={()=>{setSession(null);setRegister(false);setNotice('')}}>Çıkış yap ↗</button>}</header>
-    {!session?<main className="auth">
+    <header className="top"><Brand/><span className="wordmark">ÇEVRE BİLDİRİM SİSTEMİ</span>{(session||user)&&<button className="textBtn" disabled={busy||authLoading} onClick={()=>void logout()}>Çıkış yap ↗</button>}</header>
+    {authLoading?<main className="formArea"><p role="status">Oturum ve panel yetkisi kontrol ediliyor…</p></main>:!session?<main className="auth">
       <aside className="land"><div className="landText"><span className="eyebrow">İZMİR / BORNOVA</span><h2>Çevre bildirim<br/><em>merkezi.</em></h2><p>Çevre sorunlarını inceleyin, müdahaleleri ve sonuçlarını takip edin.</p></div><Forest/></aside>
       <section className="formArea"><div className="formBox">
-        <div className="tabs">{[false,true].map(v=><button key={String(v)} aria-pressed={register===v} onClick={()=>{setRegister(v);setNotice('')}}>{v?'Kayıt ol':'Giriş yap'}</button>)}</div>
+        <div className="tabs">{[false,true].map(v=><button key={String(v)} aria-pressed={register===v} disabled={busy} onClick={()=>{setRegister(v);setNotice('')}}>{v?'Kayıt ol':'Giriş yap'}</button>)}</div>
         <h1>{register?'Hesap oluştur':'Panele giriş'}</h1>
-        <p className="muted">{register?'Bu tarayıcı için bir belediye demo hesabı oluştur.':'Yerel hesabınla veya demo moduyla devam et.'}</p>
+        <p className="muted">{register?'Hesabınızı oluşturun. Panel erişimi için yönetici tarafından rol atanması gerekir.':'E-posta ve parolanızla veya demo moduyla devam edin.'}</p>
         <form key={String(register)} onSubmit={submit}>
           <label>E-posta<input type="email" name="email" autoComplete="email" placeholder="ornek@belediye.tr" required/></label>
           <label>Parola<input type="password" name="password" autoComplete={register?'new-password':'current-password'} minLength={register?8:1} placeholder={register?'En az 8 karakter':'Parolanı gir'} required/></label>
           {register&&<label>Parolayı tekrarla<input type="password" name="again" autoComplete="new-password" required/></label>}
-          <button className="primary wide" disabled={busy}>{register?'Kayıt ol':'Giriş yap'} <b>→</b></button>
+          <button className="primary wide" disabled={busy}>{busy?'İşlem yapılıyor…':register?'Kayıt ol':'Giriş yap'} <b>→</b></button>
         </form>
         {!register && (
           <fieldset className="demoEntry">
             <legend>Demo ile giriş yap</legend>
-            <button className="outline" onClick={() => { openPanel('municipality'); setSession('demo') }}>Belediye demosu ↗</button>
-            <button className="outline" onClick={() => { openPanel('admin'); setSession('demo') }}>Admin demosu ↗</button>
+            <button className="outline" disabled={busy} onClick={() => { openPanel('municipality'); setSession('demo') }}>Belediye demosu ↗</button>
+            <button className="outline" disabled={busy} onClick={() => { openPanel('admin'); setSession('demo') }}>Admin demosu ↗</button>
           </fieldset>
         )}
         {notice&&<p role="status" className="notice">{notice}</p>}
