@@ -8,7 +8,7 @@ React + TypeScript + Vite ile Firebase Authentication ve canlı Firestore paneli
 
 ## Firebase ve Android veri sözleşmesi
 
-Firebase projesi: `ecovoice-da355`. Kullanıcı belgesi `users/{uid}` olmalıdır. `rol` değeri `admin` veya `belediye`; belediye hesabında varsayılan ilçe alanı `ilce` zorunludur. `ilce` yoksa `district` okunur. Alan adı `VITE_USER_DISTRICT_FIELD` ile değiştirilebilir. Kayıt ol işlemi panel rolü vermez.
+Firebase projesi: `ecovoice-da355`. Kullanıcı belgesi `users/{uid}` olmalıdır. `rol` değeri `admin` veya `belediye`; belediye hesabında varsayılan ilçe alanı `ilce` zorunludur. `ilce` yoksa `district` okunur. Alan adı `VITE_USER_DISTRICT_FIELD` ile değiştirilebilir. Web panelinde yalnızca mevcut hesaplarla giriş yapılır; kayıt ve demo girişi bulunmaz.
 
 Koleksiyon adı ve aşağıdaki alanlar paylaşılan Android bildirim belgesiyle karşılaştırıldı. Canlı hesapla telefon → web akışı ayrıca doğrulanmalıdır.
 
